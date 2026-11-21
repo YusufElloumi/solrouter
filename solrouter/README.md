@@ -8,7 +8,52 @@ prompt -> classifier.py -> router.py (cheapest tier>=required w/ strength, <=3 f
        -> executor.py (pay --sandbox curl) -> ledger.py (SQLite) -> api.py / cli.py
 ```
 
-## Setup
+## Quick demo (2 minutes)
+
+Needs Python 3.11+, Node 20+ and curl.
+
+```sh
+git clone https://github.com/YusufElloumi/solrouter.git
+cd solrouter/solrouter
+
+# 1. Python deps
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+# 2. Pay.sh CLI (pick one)
+npm install -g @solana/pay      # puts `pay` on PATH (downloads the native binary on first run)
+# brew install pay
+
+# 3. Run the whole demo
+./demo.sh
+```
+
+`demo.sh` starts everything it needs in the background (mock model on :8101, its Pay.sh
+gateway on :8401, the SolRouter API on :8010), then:
+
+1. sends an unpaid request to a metered model and shows the **HTTP 402**,
+2. routes five prompts (simple, code, reasoning, long input, forced fallback) and prints each
+   answer with a summary line: `── model · category · cost · saved · attempts · payment: …`,
+3. shows the per-request **budget cap** rejecting a prompt,
+4. prints **`GET /stats`** (total spent, saved vs premium, savings %, per-model usage).
+
+The first run takes ~15 s while the sandbox gateway funds its wallets. Variants:
+
+```sh
+rm -f .run/demo.db .run/pay_down   # fresh ledger + retry real payment
+MODE=simulate ./demo.sh            # always simulate payment
+MODE=pay ./demo.sh                 # real Pay.sh payment only (see Limitations)
+PAY_BIN=/path/to/pay ./demo.sh     # if `pay` isn't on PATH
+.venv/bin/python cli.py -v "your prompt"   # one prompt, logs to the terminal
+.venv/bin/python -m pytest -q      # tests
+```
+
+Stop everything: `pkill -f mock_model.py; pkill -f "gate api"; pkill -f "uvicorn api:app"`
+
+The `payment:` field on each summary line is honest: `Pay.sh sandbox` means a real sandbox
+payment went through; `simulated` means Pay.sh was unavailable, so the real 402 price was
+recorded but no payment was sent. Logs go to `.run/solrouter.log`.
+
+## Setup (manual)
 
 ```sh
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -20,7 +65,7 @@ Env vars (all optional; put them in a local `.env` you never commit):
 | var | default | meaning |
 |---|---|---|
 | `PAY_BIN` | `pay` | path to the pay CLI |
-| `SOLROUTER_EXEC_MODE` | `pay` | `pay` = real `pay --sandbox curl`; `simulate` = **fake payment**: real 402 + gateway-quoted price, settlement skipped, answer fetched from upstream; `direct` = unpaid bypass, models.json prices |
+| `SOLROUTER_EXEC_MODE` | `auto` | `auto` = try real payment, fall back to `simulate` for 5 min if Pay.sh fails; `pay` = real `pay --sandbox curl` only; `simulate` = **fake payment**: real 402 + gateway-quoted price, settlement skipped, answer fetched from upstream; `direct` = unpaid bypass, models.json prices |
 | `SOLROUTER_DAILY_CAP_USD` | `1.00` | daily spend cap across all requests |
 | `SOLROUTER_DB` | `solrouter.db` | SQLite ledger |
 | `SOLROUTER_CALL_TIMEOUT_S` | `60` | per-upstream-call timeout (clamped 1–300) |
@@ -54,7 +99,7 @@ Tests: `.venv/bin/python -m pytest -q`
 ## Real vs mocked / estimated
 
 - **Real:** `pay` CLI 0.26.0, `pay gate api` gateways (both YAMLs load), HTTP 402 challenges, sandbox wallet funding (100 SOL + 1000 USDC confirmed on the sandbox RPC), routing, fallback, budget caps, ledger.
-- **Mocked:** all "models" (`mock_model.py` returns templated text). `placeholder-remote-llm` is a disabled placeholder; no real Pay.sh LLM endpoint was wired.
+- **Mocked:** all "models" (`mock_model.py` returns canned answers for the demo prompts and generic text otherwise). `placeholder-remote-llm` is a disabled placeholder; no real Pay.sh LLM endpoint was wired.
 - **Estimated:** every cost. `pay curl` does not print the amount paid, so cost = `price_usd_per_call` from `models.json` (charged only when the gateway delivered a 2xx) and `cost_is_estimated=true`.
 
 ## Limitations / known issues
