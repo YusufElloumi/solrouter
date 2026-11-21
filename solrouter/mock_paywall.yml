@@ -1,0 +1,54 @@
+# Pay.sh gateway for the local mock model (mock_model.py on 127.0.0.1:8101).
+# Run:  pay --sandbox gate api mock_paywall.yml --bind 127.0.0.1:8401
+# Sandbox/localnet only. No secrets in this file.
+name: solrouter-mock-model
+subdomain: solroutermock
+title: "SolRouter mock model"
+description: "Deterministic fake LLM for offline SolRouter demos."
+category: ai_ml
+version: v1
+routing:
+  type: proxy
+  url: http://127.0.0.1:8101/
+operator:
+  currencies:
+    usd: ["USDC", "USDT", "CASH"]
+  network: "localnet"
+  fee_payer: true
+endpoints:
+  - method: GET
+    path: "v1/health"
+    description: "Health check (free)."
+  - method: POST
+    path: "v1/tiny"
+    resource: "tiny"
+    description: "Cheap mock model."
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.001
+  - method: POST
+    path: "v1/mid"
+    resource: "mid"
+    description: "Mid-tier mock model."
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.005
+  - method: POST
+    path: "v1/big"
+    resource: "big"
+    description: "Premium mock model."
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.02

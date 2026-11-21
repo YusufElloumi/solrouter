@@ -1,0 +1,53 @@
+{
+  "_comment": "Candidate upstream models. request_template: JSON body; the string \"{prompt}\" anywhere in a string value is replaced with the prompt. response_path: dotted path into the JSON response (integers index lists). Models with enabled=false are placeholders (real Pay.sh LLM endpoint unknown) and are never routed to.",
+  "models": [
+    {
+      "id": "mock-tiny",
+      "url": "http://127.0.0.1:8401/v1/tiny",
+      "method": "POST",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"prompt": "{prompt}"},
+      "response_path": "output.text",
+      "price_usd_per_call": 0.001,
+      "tier": "cheap",
+      "strengths": ["simple"],
+      "enabled": true
+    },
+    {
+      "id": "mock-mid",
+      "url": "http://127.0.0.1:8401/v1/mid",
+      "method": "POST",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"prompt": "{prompt}"},
+      "response_path": "output.text",
+      "price_usd_per_call": 0.005,
+      "tier": "mid",
+      "strengths": ["simple", "code", "long_context"],
+      "enabled": true
+    },
+    {
+      "id": "mock-big",
+      "url": "http://127.0.0.1:8401/v1/big",
+      "method": "POST",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"prompt": "{prompt}"},
+      "response_path": "output.text",
+      "price_usd_per_call": 0.02,
+      "tier": "premium",
+      "strengths": ["simple", "code", "reasoning", "long_context"],
+      "enabled": true
+    },
+    {
+      "id": "placeholder-remote-llm",
+      "url": "https://example.invalid/v1/chat/completions",
+      "method": "POST",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"model": "PLACEHOLDER", "messages": [{"role": "user", "content": "{prompt}"}]},
+      "response_path": "choices.0.message.content",
+      "price_usd_per_call": 0.01,
+      "tier": "premium",
+      "strengths": ["simple", "code", "reasoning", "long_context"],
+      "enabled": false
+    }
+  ]
+}

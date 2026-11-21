@@ -1,0 +1,26 @@
+name: my-api
+subdomain: myapi
+title: "My API"
+description: "API description"
+category: ai_ml
+version: v1
+forward_url: https://api.example.com
+accounting: pooled
+
+endpoints:
+  # Free endpoint — no payment required
+  - method: GET
+    path: "v1/health"
+    description: "Health check"
+
+  # Metered endpoint — requires payment
+  - method: POST
+    path: "v1/generate"
+    description: "Generate content"
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.001

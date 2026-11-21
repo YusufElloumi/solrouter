@@ -1,0 +1,36 @@
+# Pay.sh gateway that sells SolRouter's own POST /ask at $0.01/call.
+# Upstream: uvicorn api:app --port 8010
+# Run:      pay --sandbox gate api paywall.yml --bind 127.0.0.1:8402
+# Sandbox/localnet only. No secrets in this file.
+name: solrouter
+subdomain: solrouter
+title: "SolRouter"
+description: "Routes each prompt to the cheapest capable model; pays upstreams with Pay.sh."
+category: ai_ml
+version: v1
+routing:
+  type: proxy
+  url: http://127.0.0.1:8010/
+operator:
+  currencies:
+    usd: ["USDC", "USDT", "CASH"]
+  network: "localnet"
+  fee_payer: true
+endpoints:
+  - method: GET
+    path: "stats"
+    description: "Spend and savings totals (free)."
+  - method: GET
+    path: "models"
+    description: "Model table (free)."
+  - method: POST
+    path: "ask"
+    resource: "ask"
+    description: "Answer a prompt using the cheapest capable model."
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.01
