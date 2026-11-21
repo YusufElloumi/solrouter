@@ -29,6 +29,7 @@ class AskResult:
     cost_is_estimated: bool
     saved_usd: float
     attempts: int
+    payment: str = "pay.sh-sandbox"
     tried: list = field(default_factory=list)
 
 
@@ -63,11 +64,13 @@ class SolRouter:
             r = execute(m, prompt)
             spent += r.cost_usd
             estimated = estimated or r.cost_is_estimated
-            tried.append({"model": m.id, "ok": r.ok, "cost_usd": r.cost_usd, "latency_ms": r.latency_ms, "error": r.error})
+            tried.append({"model": m.id, "ok": r.ok, "cost_usd": r.cost_usd, "latency_ms": r.latency_ms,
+                          "payment": r.payment, "error": r.error})
             if r.ok:
                 saved = max(0.0, baseline - spent)
                 self.ledger.record(LedgerEntry(phash, c.category, m.id, spent, estimated, r.latency_ms, True, baseline, i))
-                return AskResult(r.text, m.id, c.category, round(spent, 6), estimated, round(saved, 6), i, tried)
+                return AskResult(r.text, m.id, c.category, round(spent, 6), estimated, round(saved, 6), i,
+                                 r.payment, tried)
             log.error("attempt %d on %s failed: %s", i, m.id, r.error)
         self.ledger.record(LedgerEntry(phash, c.category, None, spent, estimated, 0, False, 0.0, len(tried),
                                        error="; ".join(f"{t['model']}: {t['error']}" for t in tried)[:1000]))

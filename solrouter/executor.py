@@ -1,7 +1,10 @@
 """Execute one upstream model call, paying via the Pay.sh CLI.
 
 Mode (env SOLROUTER_EXEC_MODE):
-  pay    (default) `pay --sandbox curl ...` -> handles 402, pays on localnet, retries.
+  auto   (default) try `pay`; if the payment itself fails (e.g. pay-api 504), fall back
+         to `simulate` for this call and skip real payment for PAY_DOWN_TTL_S seconds.
+  pay    `pay --sandbox curl ...` -> handles 402, pays on localnet, retries.
+  simulate  real 402 + gateway-quoted price, payment NOT sent, answer fetched directly.
   direct UNPAID dev mode: plain HTTP straight to the upstream behind the gateway
          (SOLROUTER_DIRECT_BASE, default http://127.0.0.1:8101). Exists only because
          the hosted pay-api balance check was returning 504 during development.
@@ -42,6 +45,28 @@ class ExecResult:
     latency_ms: int
     http_status: int | None
     error: str | None = None
+    payment: str = "pay.sh-sandbox"  # pay.sh-sandbox | simulated | none
+
+
+PAY_DOWN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".run", "pay_down")
+PAY_DOWN_TTL_S = 300
+PAYMENT_FAILURE_HINTS = ("Payment rejected", "pay-api", "not enough balance", "pay CLI not found")
+
+
+def _pay_is_down() -> bool:
+    try:
+        return time.time() - os.path.getmtime(PAY_DOWN_FILE) < PAY_DOWN_TTL_S
+    except OSError:
+        return False
+
+
+def _mark_pay_down(reason: str) -> None:
+    try:
+        os.makedirs(os.path.dirname(PAY_DOWN_FILE), exist_ok=True)
+        with open(PAY_DOWN_FILE, "w") as f:
+            f.write(reason[:500])
+    except OSError as e:
+        log.error("could not write %s: %s", PAY_DOWN_FILE, e)
 
 
 def _build_body(template: Any, prompt: str) -> Any:
@@ -160,10 +185,27 @@ def execute(model: ModelSpec, prompt: str, timeout_s: float | None = None) -> Ex
     timeout_s = timeout_s or float(os.environ.get("SOLROUTER_CALL_TIMEOUT_S", "60"))
     timeout_s = max(1.0, min(timeout_s, 300.0))
     body = json.dumps(_build_body(model.request_template, prompt)).encode()
-    mode = os.environ.get("SOLROUTER_EXEC_MODE", "pay")
+    mode = os.environ.get("SOLROUTER_EXEC_MODE", "auto")
     if mode == "simulate":
-        return _call_simulate(model, body, timeout_s)
+        return _simulated(model, body, timeout_s)
     if mode == "direct":
         log.warning("UNPAID direct mode: calling %s without Pay.sh", model.id)
-        return _call_direct(model, body, timeout_s)
-    return _call_pay(model, body, timeout_s)
+        r = _call_direct(model, body, timeout_s)
+        r.payment = "none"
+        return r
+    if mode == "auto" and _pay_is_down():
+        return _simulated(model, body, timeout_s)
+    r = _call_pay(model, body, timeout_s)
+    if mode == "auto" and not r.ok and any(h in (r.error or "") for h in PAYMENT_FAILURE_HINTS):
+        log.warning("Pay.sh payment unavailable (%s); simulating payment for %ss", (r.error or "")[:120], PAY_DOWN_TTL_S)
+        _mark_pay_down(r.error or "")
+        sim = _simulated(model, body, timeout_s)
+        sim.latency_ms += r.latency_ms
+        return sim
+    return r
+
+
+def _simulated(model: ModelSpec, body: bytes, timeout_s: float) -> ExecResult:
+    r = _call_simulate(model, body, timeout_s)
+    r.payment = "simulated"
+    return r
