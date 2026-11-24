@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -45,7 +46,8 @@ class ExecResult:
     latency_ms: int
     http_status: int | None
     error: str | None = None
-    payment: str = "pay.sh-sandbox"  # pay.sh-sandbox | simulated | none
+    payment: str = "pay.sh-sandbox"  # pay.sh-sandbox | pay.sh-mainnet | simulated | none
+    usage: tuple[int, int] | None = None  # (input_tokens, output_tokens) reported by the model
 
 
 PAY_DOWN_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".run", "pay_down")
@@ -91,6 +93,18 @@ def extract(data: Any, path: str) -> Any:
     return cur
 
 
+def _usage(data: Any) -> tuple[int, int] | None:
+    """Token usage from an OpenAI-style (prompt/completion_tokens) or input/output_tokens body."""
+    u = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(u, dict):
+        return None
+    for i_key, o_key in (("prompt_tokens", "completion_tokens"), ("input_tokens", "output_tokens")):
+        i, o = u.get(i_key), u.get(o_key)
+        if isinstance(i, int) and isinstance(o, int) and i >= 0 and o >= 0:
+            return i, o
+    return None
+
+
 def _finish(model: ModelSpec, status: int | None, raw: bytes, t0: float, err: str | None) -> ExecResult:
     latency = int((time.monotonic() - t0) * 1000)
     delivered = status is not None and 200 <= status < 300
@@ -100,18 +114,30 @@ def _finish(model: ModelSpec, status: int | None, raw: bytes, t0: float, err: st
     if not delivered:
         return ExecResult(False, "", cost, True, latency, status, f"HTTP {status}: {raw[:300]!r}")
     try:
-        text = extract(json.loads(raw), model.response_path)
+        data = json.loads(raw)
+        text = extract(data, model.response_path)
     except (ValueError, KeyError, IndexError, TypeError) as e:
         return ExecResult(False, "", cost, True, latency, status, f"bad response ({e}): {raw[:300]!r}")
+    usage = _usage(data)
     if not isinstance(text, str) or not text.strip():
-        return ExecResult(False, "", cost, True, latency, status, "empty answer")
-    return ExecResult(True, text, cost, True, latency, status)
+        return ExecResult(False, "", cost, True, latency, status, "empty answer", usage=usage)
+    return ExecResult(True, text, cost, True, latency, status, usage=usage)
+
+
+LOCAL_PAY_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".tools", "node_modules", ".bin", "pay")
+
+
+def resolve_pay_bin() -> str:
+    """PAY_BIN if set, else `pay` on PATH, else the project-local install (./.tools, see README)."""
+    if os.environ.get("PAY_BIN"):
+        return os.environ["PAY_BIN"]
+    return shutil.which("pay") or (LOCAL_PAY_BIN if os.access(LOCAL_PAY_BIN, os.X_OK) else "pay")
 
 
 def _call_pay(model: ModelSpec, body: bytes, timeout_s: float) -> ExecResult:
-    pay_bin = os.environ.get("PAY_BIN", "pay")
-    args = [pay_bin, "--sandbox", "curl", "-sS", "--max-time", str(int(timeout_s)),
-            "-X", model.method]
+    pay_bin = resolve_pay_bin()
+    args = [pay_bin] + (["--sandbox"] if model.network == "sandbox" else [])
+    args += ["curl", "-sS", "--max-time", str(int(timeout_s)), "-X", model.method]
     for k, v in model.headers.items():
         args += ["-H", f"{k}: {v}"]
     args += ["--data-binary", "@-", "-w", STATUS_MARK + "%{http_code}", model.url]
@@ -186,6 +212,8 @@ def execute(model: ModelSpec, prompt: str, timeout_s: float | None = None) -> Ex
     timeout_s = max(1.0, min(timeout_s, 300.0))
     body = json.dumps(_build_body(model.request_template, prompt)).encode()
     mode = os.environ.get("SOLROUTER_EXEC_MODE", "auto")
+    if model.network == "mainnet":
+        return _execute_mainnet(model, body, timeout_s, mode, len(prompt))
     if mode == "simulate":
         return _simulated(model, body, timeout_s)
     if mode == "direct":
@@ -197,11 +225,31 @@ def execute(model: ModelSpec, prompt: str, timeout_s: float | None = None) -> Ex
         return _simulated(model, body, timeout_s)
     r = _call_pay(model, body, timeout_s)
     if mode == "auto" and not r.ok and any(h in (r.error or "") for h in PAYMENT_FAILURE_HINTS):
-        log.warning("Pay.sh payment unavailable (%s); simulating payment for %ss", (r.error or "")[:120], PAY_DOWN_TTL_S)
+        hint = ""
+        if "not enough balance" in (r.error or "") and not os.environ.get("PAY_API_URL"):
+            hint = " (hosted pay-api unreachable? run pay_api_shim.py and set PAY_API_URL=http://127.0.0.1:8498)"
+        log.warning("Pay.sh payment unavailable (%s)%s; simulating payment for %ss",
+                    (r.error or "")[:120], hint, PAY_DOWN_TTL_S)
         _mark_pay_down(r.error or "")
         sim = _simulated(model, body, timeout_s)
         sim.latency_ms += r.latency_ms
         return sim
+    return r
+
+
+def _execute_mainnet(model: ModelSpec, body: bytes, timeout_s: float, mode: str, prompt_chars: int) -> ExecResult:
+    """Real USDC. Never simulated or bypassed: a payment failure is reported as a failure."""
+    if mode not in ("auto", "pay"):
+        return ExecResult(False, "", 0.0, True, 0, None,
+                          f"{model.id} is a mainnet model; SOLROUTER_EXEC_MODE={mode!r} is sandbox-only",
+                          payment="none")
+    r = _call_pay(model, body, timeout_s)
+    r.payment = "pay.sh-mainnet"
+    delivered = r.http_status is not None and 200 <= r.http_status < 300
+    if delivered and model.token_priced:
+        # Gateway delivered: cost from the model's reported token usage at the catalog rates;
+        # if usage is missing, charge the upper-bound estimate.
+        r.cost_usd = model.cost_from_usage(*r.usage) if r.usage else model.estimate_usd(prompt_chars)
     return r
 
 

@@ -1,10 +1,35 @@
+# --- Python ---
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# --- Local runtime state (logs, ledgers, pay-down marker) ---
 .run/
+*.log
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite3
+
+# --- Project-local pay CLI (npm install --prefix .tools) ---
+.tools/
+
+# --- Installed by the pay CLI / agent tooling, not project code ---
+.agents/
+skills-lock.json
+.claude/
+
+# --- Secrets / wallets: never commit (pay keeps its keys in the OS keychain) ---
 .env
 .env.*
 !.env.example
+*-keypair.json
+id.json
+accounts.yml
+*.pem
+*.key
+
+# --- OS ---
+.DS_Store

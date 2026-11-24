@@ -6,8 +6,13 @@
 #        MODE=simulate ./demo.sh always simulate payment (real 402 + quoted price)
 set -euo pipefail
 cd "$(dirname "$0")"
-PAY_BIN="${PAY_BIN:-pay}"
+# pay CLI: $PAY_BIN, else `pay` on PATH, else the project-local install (npm install --prefix .tools @solana/pay)
+PAY_BIN="${PAY_BIN:-$(command -v pay || echo .tools/node_modules/.bin/pay)}"
+# Hosted pay-api (balance lookups) is unreachable, so default to the local shim. PAY_API_URL= (empty) uses hosted.
+PAY_API_URL="${PAY_API_URL-http://127.0.0.1:8498}"
 export PAY_BIN SOLROUTER_EXEC_MODE="${MODE:-auto}" SOLROUTER_DB="${SOLROUTER_DB:-.run/demo.db}"
+[ -n "$PAY_API_URL" ] && export PAY_API_URL || unset PAY_API_URL
+[ -x "$PAY_BIN" ] || command -v "$PAY_BIN" >/dev/null || { echo "pay CLI not found; run: npm install --prefix .tools @solana/pay@1.0.26" >&2; exit 1; }
 PY=.venv/bin/python
 mkdir -p .run
 B=$'\e[1m'; D=$'\e[2m'; R=$'\e[0m'
@@ -15,12 +20,25 @@ B=$'\e[1m'; D=$'\e[2m'; R=$'\e[0m'
 up() { curl -s -o /dev/null "$1"; }
 wait_for() { for _ in $(seq 1 60); do up "$1" && return 0; sleep 1; done; echo "timeout waiting for $1" >&2; exit 1; }
 
+if [ "${PAY_API_URL:-}" = "http://127.0.0.1:8498" ]; then
+  up http://127.0.0.1:8498/health || { nohup $PY pay_api_shim.py > .run/pay_api_shim.log 2>&1 & }
+  wait_for http://127.0.0.1:8498/health
+fi
 up http://127.0.0.1:8101/v1/health || { nohup $PY mock_model.py > .run/mock_model.log 2>&1 & }
 wait_for http://127.0.0.1:8101/v1/health
 up http://127.0.0.1:8401/v1/health || { nohup "$PAY_BIN" --sandbox gate api mock_paywall.yml --bind 127.0.0.1:8401 > .run/mock_gateway.log 2>&1 & }
 wait_for http://127.0.0.1:8401/v1/health
 up http://127.0.0.1:8010/stats || { nohup .venv/bin/uvicorn api:app --port 8010 > .run/api.log 2>&1 & }
 wait_for http://127.0.0.1:8010/stats
+
+if [ "$SOLROUTER_EXEC_MODE" != simulate ]; then
+  rm -f .run/pay_down   # forget an earlier "Pay.sh is down" verdict and try real payment again
+  # First balance lookup per wallet is slow on the sandbox RPC; warm the shim until pay sees funds.
+  for _ in 1 2 3 4 5; do "$PAY_BIN" --sandbox account list 2>/dev/null | grep -q 'USDC' && break; sleep 2; done
+  "$PAY_BIN" --sandbox account list 2>/dev/null | grep -q 'USDC' \
+    && echo "${D}sandbox wallet funded; payments are real (sandbox)${R}" \
+    || echo "${D}pay cannot see wallet balance; calls will fall back to simulated payment${R}"
+fi
 
 echo "${B}1. Unpaid request to a metered model → HTTP 402${R}"
 curl -s -o /dev/null -w '   HTTP %{http_code} Payment Required\n' -X POST http://127.0.0.1:8401/v1/tiny -H 'content-type: application/json' -d '{"prompt":"hi"}'

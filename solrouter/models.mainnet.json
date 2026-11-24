@@ -1,0 +1,61 @@
+{
+  "_comment": "REAL models, paid in MAINNET USDC via Pay.sh (catalog: solana-foundation/alibaba/modelstudio). Use with SOLROUTER_MODELS=models.mainnet.json. Prices are the catalog's per-1M-token rates for inputs <= 32K tokens (SolRouter caps prompts at 20K chars). max_output_tokens bounds the worst case per call; cost charged is computed from the response's token usage. Rates checked 2026-11-24; re-check with `pay skills show alibaba/modelstudio` before relying on them.",
+  "models": [
+    {
+      "id": "qwen3.5-flash",
+      "url": "https://modelstudio.alibaba.gateway-402.com/compatible-mode/v1/chat/completions",
+      "method": "POST",
+      "network": "mainnet",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"model": "qwen3.5-flash", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 1024, "enable_thinking": false},
+      "response_path": "choices.0.message.content",
+      "in_usd_per_mtok": 0.10,
+      "out_usd_per_mtok": 0.40,
+      "max_output_tokens": 1024,
+      "tier": "cheap",
+      "strengths": ["simple"]
+    },
+    {
+      "id": "qwen3-coder-flash",
+      "url": "https://modelstudio.alibaba.gateway-402.com/compatible-mode/v1/chat/completions",
+      "method": "POST",
+      "network": "mainnet",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"model": "qwen3-coder-flash", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 2048},
+      "response_path": "choices.0.message.content",
+      "in_usd_per_mtok": 0.30,
+      "out_usd_per_mtok": 1.50,
+      "max_output_tokens": 2048,
+      "tier": "mid",
+      "strengths": ["code"]
+    },
+    {
+      "id": "qwen3.5-plus",
+      "url": "https://modelstudio.alibaba.gateway-402.com/compatible-mode/v1/chat/completions",
+      "method": "POST",
+      "network": "mainnet",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"model": "qwen3.5-plus", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 2048, "enable_thinking": false},
+      "response_path": "choices.0.message.content",
+      "in_usd_per_mtok": 0.40,
+      "out_usd_per_mtok": 2.40,
+      "max_output_tokens": 2048,
+      "tier": "mid",
+      "strengths": ["simple", "code", "long_context"]
+    },
+    {
+      "id": "qwen3.8-max",
+      "url": "https://modelstudio.alibaba.gateway-402.com/compatible-mode/v1/chat/completions",
+      "method": "POST",
+      "network": "mainnet",
+      "headers": {"content-type": "application/json"},
+      "request_template": {"model": "qwen3.8-max", "messages": [{"role": "user", "content": "{prompt}"}], "max_tokens": 4096},
+      "response_path": "choices.0.message.content",
+      "in_usd_per_mtok": 1.999,
+      "out_usd_per_mtok": 5.996,
+      "max_output_tokens": 4096,
+      "tier": "premium",
+      "strengths": ["simple", "code", "reasoning", "long_context"]
+    }
+  ]
+}

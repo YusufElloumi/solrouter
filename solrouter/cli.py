@@ -32,8 +32,10 @@ def main() -> int:
     print(r.answer)
     est = " est." if r.cost_is_estimated else ""
     path = " → ".join(t["model"] + ("" if t["ok"] else " ✗") for t in r.tried)
-    pay = {"pay.sh-sandbox": "Pay.sh sandbox", "simulated": "simulated", "none": "unpaid"}.get(r.payment, r.payment)
-    print(f"\n── {r.model} · {r.category} · ${r.cost_usd:.4f}{est} · saved ${r.saved_usd:.4f} · {path} · payment: {pay}")
+    pay = {"pay.sh-sandbox": "Pay.sh sandbox", "pay.sh-mainnet": "Pay.sh MAINNET (real USDC)",
+           "simulated": "simulated", "none": "unpaid"}.get(r.payment, r.payment)
+    usd = lambda v: f"${v:.4f}" if v == 0 or v >= 0.001 else f"${v:.6f}"  # real calls cost fractions of a cent
+    print(f"\n── {r.model} · {r.category} · {usd(r.cost_usd)}{est} · saved {usd(r.saved_usd)} · {path} · payment: {pay}")
     return 0
 
 
